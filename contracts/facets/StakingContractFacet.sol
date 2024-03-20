@@ -3,7 +3,7 @@ pragma solidity ^0.8.9;
 
 import "../interfaces/IERC20.sol";
 
-contract StakingContract {
+contract StakingContractFacet {
     error NOT_TIME_FOR_WITHDRAWAL();
     error NOT_AUTHORISED_TO_CALL_FUNCTION();
     error ZERO_VALUE();

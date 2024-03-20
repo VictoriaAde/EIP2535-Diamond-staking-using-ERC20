@@ -7,10 +7,13 @@ import "../contracts/facets/DiamondLoupeFacet.sol";
 import "../contracts/facets/OwnershipFacet.sol";
 
 import "../contracts/facets/LayoutChangerFacet.sol";
+import "../contracts/facets/StakingContractFacet.sol";
+import "../contracts/facets/StakeTokenFacet.sol";
 import "forge-std/Test.sol";
 import "../contracts/Diamond.sol";
 
 import "../contracts/libraries/LibAppStorage.sol";
+import "../contracts/libraries/LibStorageStaking.sol";
 
 contract DiamondDeployer is Test, IDiamondCut {
     //contract types of facets to be deployed
@@ -19,6 +22,8 @@ contract DiamondDeployer is Test, IDiamondCut {
     DiamondLoupeFacet dLoupe;
     OwnershipFacet ownerF;
     LayoutChangerFacet lFacet;
+    StakingContractFacet stakingFacet;
+    StakeTokenFacet stakeToken;
 
     function setUp() public {
         //deploy facets
@@ -27,6 +32,8 @@ contract DiamondDeployer is Test, IDiamondCut {
         dLoupe = new DiamondLoupeFacet();
         ownerF = new OwnershipFacet();
         lFacet = new LayoutChangerFacet();
+        stakingFacet = new StakingContractFacet();
+        stakeToken = new StakeTokenFacet();
 
         //upgrade diamond with facets
 
@@ -53,6 +60,20 @@ contract DiamondDeployer is Test, IDiamondCut {
                 facetAddress: address(lFacet),
                 action: FacetCutAction.Add,
                 functionSelectors: generateSelectors("LayoutChangerFacet")
+            })
+        );
+        cut[3] = (
+            FacetCut({
+                facetAddress: address(stakingFacet),
+                action: FacetCutAction.Add,
+                functionSelectors: generateSelectors("StakingContractFacet")
+            })
+        );
+        cut[4] = (
+            FacetCut({
+                facetAddress: address(stakeToken),
+                action: FacetCutAction.Add,
+                functionSelectors: generateSelectors("StakeTokenFacet")
             })
         );
 
@@ -82,6 +103,20 @@ contract DiamondDeployer is Test, IDiamondCut {
 
         assertEq(la.name, "one guy");
         assertEq(la.currentNo, 777);
+    }
+
+    function testStakingFacet() public {
+        StakingContractFacet stakingContract = StakingContractFacet(
+            address(diamond)
+        );
+        // .stakingContract();
+        stakingContract.deposit(10);
+
+        //check outputs
+        LibStorageStaking.StakingStorage memory stake = stakingContract
+            .getStakeToken();
+
+        assertEq(stake.amount, 10);
     }
 
     function generateSelectors(
