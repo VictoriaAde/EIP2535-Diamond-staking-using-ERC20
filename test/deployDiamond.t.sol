@@ -6,14 +6,14 @@ import "../contracts/facets/DiamondCutFacet.sol";
 import "../contracts/facets/DiamondLoupeFacet.sol";
 import "../contracts/facets/OwnershipFacet.sol";
 
-import "../contracts/facets/LayoutChangerFacet.sol";
-import "../contracts/facets/StakingContractFacet.sol";
-import "../contracts/facets/StakeTokenFacet.sol";
+import "../contracts/facets/ERC20Facet.sol";
+import "../contracts/facets/StakingFacet.sol";
+
+import "../contracts/WOWToken.sol";
 import "forge-std/Test.sol";
 import "../contracts/Diamond.sol";
 
 import "../contracts/libraries/LibAppStorage.sol";
-import "../contracts/libraries/LibStorageStaking.sol";
 
 contract DiamondDeployer is Test, IDiamondCut {
     //contract types of facets to be deployed
@@ -21,9 +21,14 @@ contract DiamondDeployer is Test, IDiamondCut {
     DiamondCutFacet dCutFacet;
     DiamondLoupeFacet dLoupe;
     OwnershipFacet ownerF;
-    LayoutChangerFacet lFacet;
-    StakingContractFacet stakingFacet;
-    StakeTokenFacet stakeToken;
+    ERC20Facet erc20Facet;
+    StakingFacet sFacet;
+    WOWToken wow;
+
+    address A = address(0xa);
+    address B = address(0xb);
+
+    StakingFacet boundStaking;
 
     function setUp() public {
         //deploy facets
@@ -31,14 +36,14 @@ contract DiamondDeployer is Test, IDiamondCut {
         diamond = new Diamond(address(this), address(dCutFacet));
         dLoupe = new DiamondLoupeFacet();
         ownerF = new OwnershipFacet();
-        lFacet = new LayoutChangerFacet();
-        stakingFacet = new StakingContractFacet();
-        stakeToken = new StakeTokenFacet();
+        erc20Facet = new ERC20Facet();
+        sFacet = new StakingFacet();
+        wow = new WOWToken(address(diamond));
 
         //upgrade diamond with facets
 
         //build cut struct
-        FacetCut[] memory cut = new FacetCut[](3);
+        FacetCut[] memory cut = new FacetCut[](4);
 
         cut[0] = (
             FacetCut({
@@ -57,66 +62,68 @@ contract DiamondDeployer is Test, IDiamondCut {
         );
         cut[2] = (
             FacetCut({
-                facetAddress: address(lFacet),
+                facetAddress: address(sFacet),
                 action: FacetCutAction.Add,
-                functionSelectors: generateSelectors("LayoutChangerFacet")
+                functionSelectors: generateSelectors("StakingFacet")
             })
         );
+
         cut[3] = (
             FacetCut({
-                facetAddress: address(stakingFacet),
+                facetAddress: address(erc20Facet),
                 action: FacetCutAction.Add,
-                functionSelectors: generateSelectors("StakingContractFacet")
-            })
-        );
-        cut[4] = (
-            FacetCut({
-                facetAddress: address(stakeToken),
-                action: FacetCutAction.Add,
-                functionSelectors: generateSelectors("StakeTokenFacet")
+                functionSelectors: generateSelectors("ERC20Facet")
             })
         );
 
         //upgrade diamond
         IDiamondCut(address(diamond)).diamondCut(cut, address(0x0), "");
 
-        //call a function
-        DiamondLoupeFacet(address(diamond)).facetAddresses();
+        //set rewardToken
+        diamond.setRewardToken(address(wow));
+        A = mkaddr("staker a");
+        B = mkaddr("staker b");
+
+        //mint test tokens
+        ERC20Facet(address(diamond)).mintTo(A);
+        ERC20Facet(address(diamond)).mintTo(B);
+
+        // ERC20Facet(address(diamond)).balanceOf(address(diamond));
+        // ERC20Facet(address(diamond)).transferFrom(
+        //     address(0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496),
+        //     A,
+        //     amt
+        // );
+        // ERC20Facet(address(diamond)).transferFrom(
+        //     address(0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496),
+        //     B,
+        //     amt
+        // );
+
+        boundStaking = StakingFacet(address(diamond));
     }
 
-    function testLayoutfacet() public {
-        LayoutChangerFacet l = LayoutChangerFacet(address(diamond));
-        // l.getLayout();
-        l.ChangeNameAndNo(777, "one guy");
+    function testStaking() public {
+        switchSigner(A);
+        boundStaking.stake(500);
+        ERC20Facet(address(diamond)).balanceOf(A);
 
-        //check outputs
-        LibAppStorage.Layout memory la = l.getLayout();
+        vm.warp(3154e7);
+        boundStaking.checkRewards(A);
 
-        assertEq(la.name, "one guy");
-        assertEq(la.currentNo, 777);
-    }
-
-    function testLayoutfacet2() public {
-        LayoutChangerFacet l = LayoutChangerFacet(address(diamond));
-        //check outputs
-        LibAppStorage.Layout memory la = l.getLayout();
-
-        assertEq(la.name, "one guy");
-        assertEq(la.currentNo, 777);
-    }
-
-    function testStakingFacet() public {
-        StakingContractFacet stakingContract = StakingContractFacet(
-            address(diamond)
+        switchSigner(B);
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingFacet.NoMoney.selector, 0)
         );
-        // .stakingContract();
-        stakingContract.deposit(10);
+        boundStaking.unstake(5);
+        ERC20Facet(address(diamond)).balanceOf(B);
 
-        //check outputs
-        LibStorageStaking.StakingStorage memory stake = stakingContract
-            .getStakeToken();
-
-        assertEq(stake.amount, 10);
+        bytes32 value = vm.load(
+            address(diamond),
+            bytes32(abi.encodePacked(uint256(2)))
+        );
+        uint256 decodevalue = abi.decode(abi.encodePacked(value), (uint256));
+        console.log(decodevalue);
     }
 
     function generateSelectors(
@@ -128,6 +135,26 @@ contract DiamondDeployer is Test, IDiamondCut {
         cmd[2] = _facetName;
         bytes memory res = vm.ffi(cmd);
         selectors = abi.decode(res, (bytes4[]));
+    }
+
+    function mkaddr(string memory name) public returns (address) {
+        address addr = address(
+            uint160(uint256(keccak256(abi.encodePacked(name))))
+        );
+        vm.label(addr, name);
+        return addr;
+    }
+
+    function switchSigner(address _newSigner) public {
+        address foundrySigner = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
+        if (msg.sender == foundrySigner) {
+            vm.startPrank(_newSigner);
+        } else {
+            vm.stopPrank();
+            vm.startPrank(_newSigner);
+        }
+
+        // uint256[] = new uint256[](2);
     }
 
     function diamondCut(
